@@ -305,32 +305,34 @@ async def handle_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle image upload."""
     user = get_user(update.effective_user.id)
     if not user:
+        await update.message.reply_text("❌ Сначала начни использовать бота командой /start")
+        return
+    note_id = context.user_data.get('note_id_for_image')
+    if not note_id:
         await update.message.reply_text(
-            "❌ Сначала начни использовать бота командой /start"
+            "❌ Сначала выбери заметку через меню 'Мои заметки' и нажми '➕ Добавить изображение'\n\n"
+            "Отправь сейчас мне текст заметки."
         )
         return
-
-    photo = update.message.photo[-1]  # Get the largest photo
+    photo = update.message.photo[-1]
     session = Session()
 
     image = Image(
         user_id=user.id,
         file_id=photo.file_id,
-        description=update.message.caption or "Без описания"
+        description=update.message.caption or "Без описания",
+        note_id=note_id
     )
-
     session.add(image)
     session.commit()
-
-    await update.message.reply_text(
-        "✅ Изображение успешно сохранено!\n\n"
-        "Ты можешь добавить описание к следующей фотографии, "
-        "отправив её вместе с текстом. 📝"
-    )
-
+    del context.user_data['note_id_for_image']
+    await update.message.reply_text("✅ Изображение успешно прикреплено к заметке!")
+    keyboard = [[
+        InlineKeyboardButton("🔙 Назад к заметкам", callback_data="list_notes")
+    ]]
+    await update.message.reply_text("📋 Вернуться к заметкам:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle button callbacks."""
@@ -451,25 +453,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         elif query.data == "list_notes":
             session = Session()
             notes = session.query(Note).filter_by(user_id=user.id).all()
-            keyboard = []
-            reply_markup = InlineKeyboardMarkup(keyboard)
 
             if not notes:
                 await query.message.edit_text("📝 У тебя пока нет заметок.")
             else:
-                await query.message.edit_text("📝 Твои заметки:\n(отображаются по одной)")
-                message = "📝 Твои заметки:\n\n"
                 for note in notes:
-                    message += f"• {note.content}\n"
-                    message += f"📅 {note.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                    keyboard.append([
-                        InlineKeyboardButton(f"❌ Удалить", callback_data=f"delete_note_{note.id}")
-                    ])
-                    message += "\n"
+                    buttons = [
+                        InlineKeyboardButton("❌ Удалить", callback_data=f"delete_note_{note.id}")
+                    ]
 
-            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="notes")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.message.edit_text(message, reply_markup=reply_markup)
+                    if note.images:
+                        buttons.insert(0, InlineKeyboardButton("📷 Открыть изображение",
+                                                               callback_data=f"show_image_{note.id}"))
+                    else:
+                        buttons.insert(0, InlineKeyboardButton("➕ Добавить изображение",
+                                                               callback_data=f"add_image_{note.id}"))
+
+                    message = f"• {note.content}\n📅 {note.created_at.strftime('%d.%m.%Y %H:%M')}"
+                    await query.message.reply_text(message, reply_markup=InlineKeyboardMarkup([buttons]))
+
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="notes")]]
+            await query.message.reply_text("Выбери заметку:", reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
         elif query.data == "list_goals":
@@ -495,6 +499,30 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="goals")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.edit_text(message, reply_markup=reply_markup)
+            return
+
+
+        elif query.data.startswith("add_image_"):
+            note_id = int(query.data.split("_")[2])
+            context.user_data['note_id_for_image'] = note_id
+            await query.message.reply_text("📷 Отправь изображение, которое хочешь прикрепить к этой заметке.")
+            return
+
+        elif query.data.startswith("show_image_"):
+            note_id = int(query.data.split("_")[2])
+            session = Session()
+            image = session.query(Image).filter_by(note_id=note_id, user_id=user.id).first()
+            if image:
+                keyboard = [[
+                    InlineKeyboardButton("🔙 Назад к заметкам", callback_data="list_notes")
+                ]]
+                await query.message.reply_photo(
+                    image.file_id,
+                    caption=f"📷 Изображение для заметки:\n{image.note.content}",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await query.message.reply_text("❌ Изображение не найдено для этой заметки.")
             return
 
 
@@ -561,7 +589,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 
                 keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="notes")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                
                 await update.message.reply_text(
                     "✅ Заметка успешно сохранена!",
                     reply_markup=reply_markup
@@ -848,7 +875,7 @@ async def show_games_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "/rps - начать игру 'Камень-ножницы-бумага'\n"
             "/quiz - начать викторину"
         )
-        
+
         if update.callback_query:
             await update.callback_query.message.edit_text(message, reply_markup=reply_markup)
         else:

@@ -59,10 +59,11 @@ class Image(Base):
     user_id = Column(Integer, ForeignKey('users.id'))
     file_id = Column(String)
     description = Column(Text)
+    note_id = Column(Integer, ForeignKey('notes.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="images")
-
+    note = relationship("Note", backref="images")
 
 class Message(Base):
     __tablename__ = 'messages'
