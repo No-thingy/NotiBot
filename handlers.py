@@ -451,39 +451,77 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         elif query.data == "list_notes":
             session = Session()
             notes = session.query(Note).filter_by(user_id=user.id).all()
-            
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="notes")]]
+            keyboard = []
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             if not notes:
-                message = "📝 У тебя пока нет заметок."
+                await query.message.edit_text("📝 У тебя пока нет заметок.")
             else:
+                await query.message.edit_text("📝 Твои заметки:\n(отображаются по одной)")
                 message = "📝 Твои заметки:\n\n"
                 for note in notes:
                     message += f"• {note.content}\n"
-                    message += f"📅 {note.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
-            
+                    message += f"📅 {note.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                    keyboard.append([
+                        InlineKeyboardButton(f"❌ Удалить", callback_data=f"delete_note_{note.id}")
+                    ])
+                    message += "\n"
+
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="notes")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.edit_text(message, reply_markup=reply_markup)
             return
 
         elif query.data == "list_goals":
             session = Session()
             goals = session.query(Goal).filter_by(user_id=user.id).all()
-            
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="goals")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
+            message = "🎯 Твои цели:\n\n"
+            keyboard = []
+
             if not goals:
                 message = "🎯 У тебя пока нет целей."
             else:
-                message = "🎯 Твои цели:\n\n"
                 for goal in goals:
                     message += f"• {goal.title}\n"
-                    message += f"📝 {goal.description}\n"
+                    message += f"📄 {goal.description}\n"
                     message += f"📅 {goal.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                    message += f"📊 Статус: {goal.status}\n\n"
-            
+                    message += f"📌 Статус: {goal.status}\n"
+                    message += "\n"
+                    keyboard.append([
+                        InlineKeyboardButton("❌ Удалить", callback_data=f"delete_goal_{goal.id}")
+                    ])
+
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="goals")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.message.edit_text(message, reply_markup=reply_markup)
+            return
+
+
+        elif query.data.startswith("delete_note_"):
+            note_id = int(query.data.split("_")[2])
+            session = Session()
+            note = session.query(Note).filter_by(id=note_id, user_id=user.id).first()
+            if note:
+                session.delete(note)
+                session.commit()
+                await query.message.reply_text("✅ Заметка удалена.")
+            else:
+                await query.message.reply_text("❌ Заметка не найдена.")
+            await handle_notes(update, context)
+            return
+
+        elif query.data.startswith("delete_goal_"):
+            goal_id = int(query.data.split("_")[2])
+            session = Session()
+            goal = session.query(Goal).filter_by(id=goal_id, user_id=user.id).first()
+            if goal:
+                session.delete(goal)
+                session.commit()
+                await query.message.reply_text("✅ Цель удалена.")
+            else:
+                await query.message.reply_text("❌ Цель не найдена.")
+            await handle_goals(update, context)
             return
 
     except Exception as e:
@@ -743,7 +781,7 @@ async def show_quiz_question(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             if update.effective_user.id in user_states:
                 del user_states[update.effective_user.id]
-            
+
             keyboard = [
                 [
                     InlineKeyboardButton("🎮 Игры", callback_data="games_menu"),
